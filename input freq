@@ -1,0 +1,172 @@
+#include <LiquidCrystal.h>
+
+// =====================================================
+// LCD
+// RS, EN, D4, D5, D6, D7
+// =====================================================
+LiquidCrystal lcd(8, 9, 4, 5, 6, 7);
+
+// =====================================================
+// PINS
+// =====================================================
+const byte SIGNAL_PIN = 3;   // Test signal
+const byte CAPTURE_PIN = 2;  // Interrupt input
+
+// =====================================================
+// TIMER1
+// Timer clock = 16 MHz / 8
+// = 2 MHz
+// 1 tick = 0.5 us
+// =====================================================
+
+// Variables modified inside ISR
+volatile unsigned long previousCapture = 0;
+volatile unsigned long periodTicks = 0;
+volatile bool newCapture = false;
+
+// =====================================================
+// SETUP
+// =====================================================
+void setup()
+{
+  lcd.begin(16, 2);
+
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("MODULE 5 TASK 2");
+  lcd.setCursor(0, 1);
+  lcd.print("CAPTURE TEST");
+
+  // Test signal output
+  pinMode(SIGNAL_PIN, OUTPUT);
+
+  // Capture input
+  pinMode(CAPTURE_PIN, INPUT);
+
+  // ---------------------------------------------------
+  // TIMER1 SETUP
+  // ---------------------------------------------------
+
+  TCCR1A = 0;
+  TCCR1B = 0;
+
+  // Normal timer mode
+  TCCR1B |= (1 << CS11);
+
+  // Prescaler = 8
+  // Timer clock = 16 MHz / 8 = 2 MHz
+
+  TCNT1 = 0;
+
+  // ---------------------------------------------------
+  // External interrupt on D2
+  // Trigger on rising edge
+  // ---------------------------------------------------
+
+  attachInterrupt(
+    digitalPinToInterrupt(CAPTURE_PIN),
+    captureEdge,
+    RISING
+  );
+
+  // ---------------------------------------------------
+  // Generate approximately 500 Hz signal on D3
+  // Using Timer2 hardware
+  // ---------------------------------------------------
+
+  TCCR2A = 0;
+  TCCR2B = 0;
+
+  // CTC mode
+  TCCR2A |= (1 << WGM21);
+
+  // Toggle OC2B/D3 on compare match
+  TCCR2A |= (1 << COM2B0);
+
+  // Prescaler = 64
+  TCCR2B |= (1 << CS22);
+
+  // Approximately 500 Hz
+  OCR2A = 249;
+
+  delay(1000);
+
+  lcd.clear();
+}
+
+// =====================================================
+// LOOP
+// =====================================================
+void loop()
+{
+  static unsigned long lastDisplay = 0;
+
+  unsigned long currentTime = millis();
+
+  // ---------------------------------------------------
+  // New capture received
+  // ---------------------------------------------------
+
+  if (newCapture)
+  {
+    noInterrupts();
+
+    unsigned long capturedPeriod = periodTicks;
+
+    newCapture = false;
+
+    interrupts();
+
+    // -------------------------------------------------
+    // Calculate frequency
+    //
+    // Timer tick = 0.5 us
+    //
+    // Period in seconds:
+    // periodTicks * 0.5 us
+    //
+    // Frequency:
+    // 1 / period
+    // -------------------------------------------------
+
+    if (capturedPeriod > 0)
+    {
+      unsigned long frequency =
+        2000000UL / capturedPeriod;
+
+      lcd.clear();
+
+      lcd.setCursor(0, 0);
+      lcd.print("CAPTURE:");
+
+      lcd.setCursor(0, 1);
+      lcd.print("FREQ:");
+      lcd.print(frequency);
+      lcd.print(" Hz");
+    }
+  }
+
+  // ---------------------------------------------------
+  // Keep the loop non-blocking
+  // ---------------------------------------------------
+
+  if (currentTime - lastDisplay >= 1000)
+  {
+    lastDisplay = currentTime;
+  }
+}
+
+// =====================================================
+// INTERRUPT SERVICE ROUTINE
+// =====================================================
+void captureEdge()
+{
+  unsigned long currentCapture = TCNT1;
+
+  periodTicks =
+    currentCapture - previousCapture;
+
+  previousCapture = currentCapture;
+
+  newCapture = true;
+}
