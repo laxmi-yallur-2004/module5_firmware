@@ -1,0 +1,142 @@
+#include <LiquidCrystal.h>
+
+// =====================================================
+// LCD CONNECTION
+// RS, EN, D4, D5, D6, D7
+// =====================================================
+LiquidCrystal lcd(8, 9, 4, 5, 6, 7);
+
+// =====================================================
+// PWM
+// Timer2 OC2B = Arduino D3
+// =====================================================
+const int PWM_PIN = 3;
+
+// =====================================================
+// Duty cycle variables
+// =====================================================
+int duty = 50;
+int step = 25;
+
+// Used for non-blocking duty update
+unsigned long previousTime = 0;
+
+// =====================================================
+// SETUP
+// =====================================================
+void setup()
+{
+  // LCD
+  lcd.begin(16, 2);
+  lcd.clear();
+
+  // PWM pin
+  pinMode(PWM_PIN, OUTPUT);
+
+  // ---------------------------------------------------
+  // TIMER2 CONFIGURATION
+  // ---------------------------------------------------
+
+  // Clear Timer2 registers
+  TCCR2A = 0;
+  TCCR2B = 0;
+
+  // Fast PWM mode
+  // WGM22:WGM20 = 011
+  TCCR2A |= (1 << WGM20);
+  TCCR2A |= (1 << WGM21);
+
+  // Non-inverting PWM on OC2B = D3
+  TCCR2A |= (1 << COM2B1);
+
+  // Prescaler = 64
+  TCCR2B |= (1 << CS22);
+
+  // Initial duty cycle
+  setDuty(duty);
+
+  // ---------------------------------------------------
+  // LCD DISPLAY
+  // ---------------------------------------------------
+
+  lcd.setCursor(0, 0);
+  lcd.print("MODULE 5 TASK 1");
+
+  lcd.setCursor(0, 1);
+  lcd.print("PWM Starting...");
+
+  delay(1000);
+
+  displayPWM();
+}
+
+// =====================================================
+// LOOP
+// =====================================================
+void loop()
+{
+  unsigned long currentTime = millis();
+
+  // Change duty every 1 second
+  if (currentTime - previousTime >= 1000)
+  {
+    previousTime = currentTime;
+
+    duty = duty + step;
+
+    // When duty reaches 100%
+    if (duty >= 100)
+    {
+      duty = 100;
+      step = -25;
+    }
+
+    // When duty reaches 0%
+    if (duty <= 0)
+    {
+      duty = 0;
+      step = 25;
+    }
+
+    // Update PWM
+    setDuty(duty);
+
+    // Update LCD
+    displayPWM();
+  }
+}
+
+// =====================================================
+// SET PWM DUTY CYCLE
+// =====================================================
+void setDuty(int percentage)
+{
+  if (percentage <= 0)
+  {
+    OCR2B = 0;
+  }
+  else if (percentage >= 100)
+  {
+    OCR2B = 255;
+  }
+  else
+  {
+    OCR2B = ((long)255 * percentage) / 100;
+  }
+}
+
+// =====================================================
+// DISPLAY PWM INFORMATION
+// =====================================================
+void displayPWM()
+{
+  lcd.clear();
+
+  lcd.setCursor(0, 0);
+  lcd.print("PWM: 977 Hz");
+
+  lcd.setCursor(0, 1);
+  lcd.print("DUTY: ");
+  lcd.print(duty);
+  lcd.print("%");
+}
