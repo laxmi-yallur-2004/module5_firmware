@@ -1,0 +1,115 @@
+#include <LiquidCrystal.h>
+
+// ==================================================
+// LCD
+// RS, EN, D4, D5, D6, D7
+// ==================================================
+LiquidCrystal lcd(8, 9, 4, 5, 6, 7);
+
+// ==================================================
+// SOFTWARE TIMER INTERVALS
+// ==================================================
+const unsigned long TASK_A_INTERVAL = 1000;  // 1 second
+const unsigned long TASK_B_INTERVAL = 2000;  // 2 seconds
+const unsigned long TASK_C_INTERVAL = 5000;  // 5 seconds
+
+// ==================================================
+// LAST EXECUTION TIMES
+// ==================================================
+unsigned long lastTaskA = 0;
+unsigned long lastTaskB = 0;
+unsigned long lastTaskC = 0;
+
+// ==================================================
+// TASK COUNTERS
+// ==================================================
+unsigned int countA = 0;
+unsigned int countB = 0;
+unsigned int countC = 0;
+
+// ==================================================
+// DISPLAY FUNCTION
+// ==================================================
+void updateLCD()
+{
+  lcd.setCursor(0, 0);
+  lcd.print("SOFT TIMER      ");
+
+  lcd.setCursor(0, 1);
+  lcd.print("A:");
+  lcd.print(countA);
+
+  lcd.print(" B:");
+  lcd.print(countB);
+
+  lcd.print(" C:");
+  lcd.print(countC);
+
+  lcd.print("   ");
+}
+
+// ==================================================
+// SETUP
+// ==================================================
+void setup()
+{
+  lcd.begin(16, 2);
+
+  lcd.clear();
+  updateLCD();
+}
+
+// ==================================================
+// MAIN LOOP
+// ==================================================
+void loop()
+{
+  // Get current time
+  unsigned long currentTime = millis();
+
+  bool taskExecuted = false;
+
+  // ==================================================
+  // TASK A - EVERY 1 SECOND
+  // ==================================================
+  if (currentTime - lastTaskA >= TASK_A_INTERVAL)
+  {
+    lastTaskA += TASK_A_INTERVAL;
+
+    countA++;
+
+    taskExecuted = true;
+  }
+
+  // ==================================================
+  // TASK B - EVERY 2 SECONDS
+  // ==================================================
+  if (currentTime - lastTaskB >= TASK_B_INTERVAL)
+  {
+    lastTaskB += TASK_B_INTERVAL;
+
+    countB++;
+
+    taskExecuted = true;
+  }
+
+  // ==================================================
+  // TASK C - EVERY 5 SECONDS
+  // ==================================================
+  if (currentTime - lastTaskC >= TASK_C_INTERVAL)
+  {
+    lastTaskC += TASK_C_INTERVAL;
+
+    countC++;
+
+    taskExecuted = true;
+  }
+
+  // ==================================================
+  // UPDATE LCD ONLY WHEN A TASK RUNS
+  // ==================================================
+  if (taskExecuted)
+  {
+    updateLCD();
+  }
+}
