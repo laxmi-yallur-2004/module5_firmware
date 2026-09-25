@@ -1,241 +1,195 @@
-# MODULE 5 — PWM, Frequency Measurement and Software Scheduler
+# MODULE 5 – PWM, FREQUENCY MEASUREMENT AND SOFTWARE TIMER
 
-## 1. Objective
+## 1. What We Did
 
-This module implements:
+In this module we implemented:
 
-1. PWM generation using Timer2 on Arduino Uno D3.
-2. Exact 0% and 100% PWM handling.
-3. Frequency measurement using D2 external interrupt and Timer1.
-4. No-signal detection when PWM is 0% or 100%.
-5. Software scheduler with three periodic tasks.
-6. LCD display of PWM and frequency status.
-7. Non-blocking firmware without `delay()`.
+* PWM generation using Timer2 on D3
+* Frequency measurement using Timer1 on D2
+* D3 to D2 jumper for self-test
+* 0%, 25%, 50% and 100% PWM duty cycle
+* No-signal detection
+* Software timers
+* LCD monitoring
 
----
-
-## 2. Hardware
-
-| Item                    | Connection         |
-| ----------------------- | ------------------ |
-| Arduino Uno             | ATmega328P, 16 MHz |
-| PWM output              | D3                 |
-| Frequency capture input | D2                 |
-| Test connection         | D3 → D2 jumper     |
-| LCD RS                  | D8                 |
-| LCD EN                  | D9                 |
-| LCD D4                  | D4                 |
-| LCD D5                  | D5                 |
-| LCD D6                  | D6                 |
-| LCD D7                  | D7                 |
-| Serial Monitor          | 9600 baud          |
-
-The D3 output is connected to D2 using a jumper so that the generated PWM signal can be measured by the interrupt capture input.
+The code uses no `delay()` and no dynamic memory.
 
 ---
 
-## 3. PWM Implementation
+# TASK 1 – PWM GENERATION
 
-Timer2 is configured in Fast PWM mode with a prescaler of 64.
+PWM is generated using **Timer2 on D3**.
 
-The PWM frequency is approximately:
-
-**976.56 Hz**
-
-The firmware supports:
-
-* 0% → D3 forced LOW
-* 25% → OCR2B = 64
-* 50% → OCR2B = 128
-* 75% → OCR2B = 191
-* 100% → D3 forced HIGH
-
-Exact 0% and 100% are handled separately so that the output does not generate an unwanted PWM pulse.
-
----
-
-## 4. Frequency Measurement
-
-D2 is configured as an external interrupt input.
-
-The rising edges from D3 are captured on D2.
-
-Timer1 runs with a 2 MHz timer clock. The measured period between two rising edges is used to calculate frequency.
-
-The measured frequency is approximately:
-
-**976–977 Hz**
-
-Small variations such as 976 Hz and 977 Hz are expected because the actual Timer2 PWM frequency is approximately 976.56 Hz and the displayed frequency is an integer value.
-
----
-
-## 5. No-Signal Detection
-
-When PWM is set to 0%:
+PWM frequency:
 
 ```text
-D3 = LOW
+~977 Hz
 ```
 
-There are no continuous rising edges, so the frequency measurement becomes:
+### PWM Duty Cycle Sequence
 
 ```text
-WAIT - NO SIGNAL
+100% → 0% → 25% → 50% → 100%
 ```
 
-When PWM is set to 100%:
+### Actual Output
 
 ```text
-D3 = HIGH
-```
-
-There are also no continuous rising edges, so the frequency measurement becomes:
-
-```text
-WAIT - NO SIGNAL
-```
-
-This prevents the LCD/Serial output from displaying an old or stale frequency value.
-
----
-
-## 6. Software Scheduler
-
-Three non-blocking software timer tasks are implemented:
-
-| Task   |    Period |
-| ------ | --------: |
-| Task A |  1 second |
-| Task B | 2 seconds |
-| Task C | 5 seconds |
-
-The scheduler uses time comparisons rather than `delay()`.
-
-Example observed output:
-
-```text
-SOFT TIMER A:32 B:16 C:6
-SOFT TIMER A:33 B:16 C:6
-SOFT TIMER A:34 B:17 C:6
-SOFT TIMER A:35 B:17 C:7
-SOFT TIMER A:36 B:18 C:7
-SOFT TIMER A:37 B:18 C:7
-SOFT TIMER A:38 B:19 C:7
-SOFT TIMER A:39 B:19 C:7
-```
-
-The counters show that the three scheduler tasks are executing at their configured intervals.
-
----
-
-# 7. Actual Serial Monitor Proof
-
-The following is the actual observed output from the Arduino Uno:
-
-```text
-FREQUENCY: 977 Hz
-FREQUENCY: 977 Hz
-FREQUENCY: 977 Hz
-FREQUENCY: 977 Hz
-
-PWM DUTY: 100% -> D3 HIGH
-
-SOFT TIMER A:32 B:16 C:6
-
 PWM DUTY: 0% -> D3 LOW
-
-SOFT TIMER A:33 B:16 C:6
-
 PWM DUTY: 25% -> OCR2B=64
-
-SOFT TIMER A:34 B:17 C:6
-
-FREQUENCY: 977 Hz
-FREQUENCY: 977 Hz
-FREQUENCY: 977 Hz
-FREQUENCY: 976 Hz
-
 PWM DUTY: 50% -> OCR2B=128
-
-SOFT TIMER A:35 B:17 C:7
-
-FREQUENCY: 977 Hz
-FREQUENCY: 977 Hz
-FREQUENCY: 977 Hz
-FREQUENCY: 977 Hz
-
-PWM DUTY: 75% -> OCR2B=191
-
-SOFT TIMER A:36 B:18 C:7
-
-FREQUENCY: 977 Hz
-FREQUENCY: 977 Hz
-FREQUENCY: 977 Hz
-FREQUENCY: 977 Hz
-
 PWM DUTY: 100% -> D3 HIGH
+```
 
-SOFT TIMER A:37 B:18 C:7
+0% and 100% are handled specially:
 
-PWM DUTY: 0% -> D3 LOW
-
-SOFT TIMER A:38 B:19 C:7
-
-PWM DUTY: 25% -> OCR2B=64
-
-SOFT TIMER A:39 B:19 C:7
-
-FREQUENCY: 977 Hz
+```text
+0%   → D3 LOW
+100% → D3 HIGH
 ```
 
 ---
 
-# 8. Measured Results
+# TASK 2 – FREQUENCY MEASUREMENT
 
-| PWM Duty | D3 Output | Observed Frequency |
-| -------: | --------- | -----------------: |
-|       0% | LOW       |   WAIT - NO SIGNAL |
-|      25% | PWM       |         976–977 Hz |
-|      50% | PWM       |             977 Hz |
-|      75% | PWM       |             977 Hz |
-|     100% | HIGH      |   WAIT - NO SIGNAL |
+Frequency is measured using **Timer1 on D2**.
 
-The 25%, 50% and 75% PWM settings successfully produce frequency measurements around 976–977 Hz.
+The self-test connection is:
 
----
+```text
+D3 → D2
+```
 
-# 9. Proof of Requirements
+Timer1 runs at:
 
-| Requirement            | Proof                                           |
-| ---------------------- | ----------------------------------------------- |
-| PWM generation         | `PWM DUTY` messages observed                    |
-| 0% handling            | `PWM DUTY: 0% -> D3 LOW`                        |
-| 25% handling           | `PWM DUTY: 25% -> OCR2B=64`                     |
-| 50% handling           | `PWM DUTY: 50% -> OCR2B=128`                    |
-| 75% handling           | `PWM DUTY: 75% -> OCR2B=191`                    |
-| 100% handling          | `PWM DUTY: 100% -> D3 HIGH`                     |
-| Frequency capture      | `FREQUENCY: 976/977 Hz`                         |
-| No-signal detection    | `WAIT - NO SIGNAL` at 0% and 100%               |
-| Software Timer A       | Counter increases approximately every 1 second  |
-| Software Timer B       | Counter increases approximately every 2 seconds |
-| Software Timer C       | Counter increases approximately every 5 seconds |
-| Non-blocking operation | No `delay()` used                               |
-| D3 → D2 capture        | PWM output connected to D2 interrupt input      |
+```text
+16 MHz / 8 = 2 MHz
+```
+
+When there is no valid signal for the timeout period, the previous frequency is cleared.
+
+### Actual Output
+
+```text
+FREQUENCY: WAIT - NO SIGNAL
+```
 
 ---
 
-# 10. Final Result
+# TASK 3 – SOFTWARE TIMER
 
-Module 5 successfully demonstrates:
+Three non-blocking software timers are used.
 
-* Timer2 hardware PWM generation.
-* Exact 0% and 100% output handling.
-* Timer1-based period measurement.
-* External interrupt frequency capture.
-* No-signal timeout and stale-frequency prevention.
-* Three non-blocking software scheduler tasks.
-* Serial monitoring of measured results.
-* LCD status display.
+| Timer |  Period |
+| ----- | ------: |
+| A     | 1000 ms |
+| B     |  500 ms |
+| C     |  250 ms |
 
-**MODULE 5 TEST: PASS**
+### Actual Output
+
+```text
+SOFT TIMER A:1 B:1 C:3
+SOFT TIMER A:2 B:3 C:7
+SOFT TIMER A:3 B:5 C:11
+SOFT TIMER A:4 B:7 C:15
+SOFT TIMER A:5 B:9 C:19
+SOFT TIMER A:6 B:11 C:23
+SOFT TIMER A:7 B:13 C:27
+SOFT TIMER A:8 B:15 C:31
+SOFT TIMER A:9 B:17 C:35
+SOFT TIMER A:10 B:19 C:39
+SOFT TIMER A:11 B:21 C:43
+SOFT TIMER A:12 B:23 C:47
+SOFT TIMER A:13 B:25 C:51
+SOFT TIMER A:14 B:27 C:55
+```
+
+---
+
+# TASK 4 – LCD DISPLAY
+
+The LCD displays:
+
+* PWM duty cycle
+* Frequency
+* Software timer counters
+* Timer1 information
+
+When no frequency signal is available, the LCD shows:
+
+```text
+FREQ:WAIT
+```
+
+---
+
+# TIMER ALLOCATION
+
+```text
+Timer1 → Frequency Measurement
+Timer2 → PWM Generation
+Timer0 → Arduino millis()
+```
+
+Serial output:
+
+```text
+PWM: TIMER2 D3
+FREQ: TIMER1 D2
+D3 -> D2 JUMPER
+PWM FREQUENCY: ~977 Hz
+TIMER1 RESERVED: FREQUENCY
+TIMER2 RESERVED: PWM
+```
+
+---
+
+# ACTUAL SERIAL MONITOR OUTPUT
+
+```text
+==============================
+MODULE 5
+==============================
+PWM: TIMER2 D3
+FREQ: TIMER1 D2
+D3 -> D2 JUMPER
+PWM FREQUENCY: ~977 Hz
+TIMER1 RESERVED: FREQUENCY
+TIMER2 RESERVED: PWM
+==============================
+SOFT TIMER A:1 B:1 C:3
+SOFT TIMER A:2 B:3 C:7
+SOFT TIMER A:3 B:5 C:11
+PWM DUTY: 0% -> D3 LOW
+FREQUENCY: WAIT - NO SIGNAL
+SOFT TIMER A:4 B:7 C:15
+SOFT TIMER A:5 B:9 C:19
+SOFT TIMER A:6 B:11 C:23
+PWM DUTY: 25% -> OCR2B=64
+SOFT TIMER A:7 B:13 C:27
+SOFT TIMER A:8 B:15 C:31
+SOFT TIMER A:9 B:17 C:35
+PWM DUTY: 50% -> OCR2B=128
+SOFT TIMER A:10 B:19 C:39
+SOFT TIMER A:11 B:21 C:43
+SOFT TIMER A:12 B:23 C:47
+PWM DUTY: 100% -> D3 HIGH
+SOFT TIMER A:13 B:25 C:51
+FREQUENCY: WAIT - NO SIGNAL
+SOFT TIMER A:14 B:27 C:55
+```
+
+# RESULT
+
+Module 5 successfully implements:
+
+```text
+Timer2 PWM
+Timer1 Frequency Measurement
+0%, 25%, 50%, 100% Duty Cycle
+No-Signal Detection
+Software Timers
+LCD Monitoring
+D3 → D2 Self-Test
+```
