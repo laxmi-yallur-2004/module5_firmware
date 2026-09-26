@@ -29,7 +29,7 @@ uint32_t nextLcdPage;
 uint8_t dutyIndex = 0;
 uint8_t lcdPage = 0;
 
-const uint8_t dutyValues[] = {100, 0, 25, 50};
+const uint8_t dutyValues[] = {100, 0, 25, 50, 75};
 const uint8_t DUTY_COUNT = sizeof(dutyValues) / sizeof(dutyValues[0]);
 
 const uint32_t TASK_A_TIME = 1000UL;
@@ -231,44 +231,27 @@ void taskC()
     taskCCount++;
 }
 
-void runScheduler(uint32_t now)
+ void runScheduler(uint32_t now)
 {
-    while ((int32_t)(now - nextTaskA) >= 0)
-    {
-        taskA();
-        nextTaskA += TASK_A_TIME;
-
-        if ((uint32_t)(now - nextTaskA) > 10000UL)
-        {
-            nextTaskA = now + TASK_A_TIME;
-            break;
-        }
-    }
-
     while ((int32_t)(now - nextTaskB) >= 0)
     {
         taskB();
         nextTaskB += TASK_B_TIME;
-
-        if ((uint32_t)(now - nextTaskB) > 10000UL)
-        {
-            nextTaskB = now + TASK_B_TIME;
-            break;
-        }
     }
 
     while ((int32_t)(now - nextTaskC) >= 0)
     {
         taskC();
         nextTaskC += TASK_C_TIME;
-
-        if ((uint32_t)(now - nextTaskC) > 10000UL)
-        {
-            nextTaskC = now + TASK_C_TIME;
-            break;
-        }
     }
-}
+
+    while ((int32_t)(now - nextTaskA) >= 0)
+    {
+        taskA();
+        nextTaskA += TASK_A_TIME;
+    }
+  }
+
 
 /* ============================================================
    FREQUENCY TIMEOUT
