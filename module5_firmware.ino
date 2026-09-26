@@ -4,7 +4,7 @@
 
 LiquidCrystal lcd(8, 9, 4, 5, 6, 7);
 
-/* Timer1: frequency measurement */
+/* Timer1 frequency measurement variables */
 volatile uint32_t timer1OverflowCount = 0;
 volatile uint32_t lastTimestamp = 0;
 volatile uint32_t periodTicks = 0;
@@ -12,14 +12,15 @@ volatile uint32_t lastEdgeMillis = 0;
 volatile bool firstEdge = true;
 volatile bool frequencyValid = false;
 
-/* PWM */
-uint8_t pwmDuty = 50;
+/* Current PWM duty */
+uint8_t pwmDuty = 0;
 
-/* Scheduler */
+/* Software timer counters */
 uint32_t taskACount = 0;
 uint32_t taskBCount = 0;
 uint32_t taskCCount = 0;
 
+/* Next execution times */
 uint32_t nextTaskA;
 uint32_t nextTaskB;
 uint32_t nextTaskC;
@@ -29,22 +30,40 @@ uint32_t nextLcdPage;
 uint8_t dutyIndex = 0;
 uint8_t lcdPage = 0;
 
-const uint8_t dutyValues[] = {100, 0, 25, 50, 75};
+/* PWM duty sequence */
+const uint8_t dutyValues[] = {0, 25, 50, 75, 100};
 const uint8_t DUTY_COUNT = sizeof(dutyValues) / sizeof(dutyValues[0]);
 
+/* Software timer periods in milliseconds */
 const uint32_t TASK_A_TIME = 1000UL;
 const uint32_t TASK_B_TIME = 500UL;
 const uint32_t TASK_C_TIME = 250UL;
+
 const uint32_t DUTY_TIME = 3000UL;
 const uint32_t LCD_TIME = 1000UL;
 
+/* Timer1: 16 MHz / 8 = 2 MHz */
 const uint32_t TIMER1_TICK_HZ = 2000000UL;
+
+/* No signal after 1 second */
 const uint32_t SIGNAL_TIMEOUT = 1000UL;
 
-/* ============================================================
-   PWM
-   ============================================================ */
 
+/* Clear old frequency measurement */
+void invalidateFrequency()
+{
+    uint8_t sreg = SREG;
+    cli();
+
+    frequencyValid = false;
+    firstEdge = true;
+    periodTicks = 0;
+
+    SREG = sreg;
+}
+
+
+/* Set PWM duty and handle exact 0% / 100% safely */
 void setPwmDuty(uint8_t duty)
 {
     if (duty > 100)
@@ -52,23 +71,35 @@ void setPwmDuty(uint8_t duty)
 
     pwmDuty = duty;
 
+    /* Exact 0%: disconnect PWM and force D3 LOW */
     if (duty == 0)
     {
         TCCR2A &= ~(1 << COM2B1);
         PORTD &= ~(1 << PORTD3);
+
+        invalidateFrequency();
+
         Serial.println("PWM DUTY: 0% -> D3 LOW");
+        Serial.println("FREQUENCY: WAIT - NO SIGNAL");
         return;
     }
 
+    /* Exact 100%: disconnect PWM and force D3 HIGH */
     if (duty == 100)
     {
         TCCR2A &= ~(1 << COM2B1);
         PORTD |= (1 << PORTD3);
+
+        invalidateFrequency();
+
         Serial.println("PWM DUTY: 100% -> D3 HIGH");
+        Serial.println("FREQUENCY: WAIT - NO SIGNAL");
         return;
     }
 
+    /* Rounded OCR2B value for 25%, 50%, 75% */
     OCR2B = ((uint16_t)duty * 255UL + 50UL) / 100UL;
+
     TCCR2A |= (1 << COM2B1);
 
     Serial.print("PWM DUTY: ");
@@ -77,6 +108,8 @@ void setPwmDuty(uint8_t duty)
     Serial.println(OCR2B);
 }
 
+
+/* Timer2 Fast PWM on D3, frequency about 977 Hz */
 void setupPwm()
 {
     DDRD |= (1 << DDD3);
@@ -84,56 +117,61 @@ void setupPwm()
     TCCR2A = 0;
     TCCR2B = 0;
 
-    /* Fast PWM, prescaler 64 */
+    /* Fast PWM, TOP = 255 */
     TCCR2A |= (1 << WGM21) | (1 << WGM20);
+
+    /* Prescaler = 64 */
     TCCR2B |= (1 << CS22);
 
-    OCR2B = 128;
+    OCR2B = 0;
 }
 
-/* ============================================================
-   TIMER1 FREQUENCY MEASUREMENT
-   ============================================================ */
 
+/* Timer1 measures the period of the signal on D2 */
 void setupFrequencyMeasurement()
 {
-    /* D2 input + internal pull-up */
+    /* D2 input with internal pull-up */
     DDRD &= ~(1 << DDD2);
     PORTD |= (1 << PORTD2);
 
     TCCR1A = 0;
     TCCR1B = 0;
     TCNT1 = 0;
+
     timer1OverflowCount = 0;
 
-    /* Timer1: 16 MHz / 8 = 2 MHz */
+    /* Timer1 clock = 16 MHz / 8 = 2 MHz */
     TCCR1B |= (1 << CS11);
 
-    /* W1C: clear Timer1 overflow flag */
+    /* Clear pending overflow flag */
     TIFR1 = (1 << TOV1);
 
     TIMSK1 |= (1 << TOIE1);
 
-    /* INT0 rising edge */
+    /* INT0 on rising edge */
     EICRA |= (1 << ISC01) | (1 << ISC00);
 
-    /* W1C: clear INT0 flag */
+    /* Clear pending external interrupt flag */
     EIFR = (1 << INTF0);
 
     EIMSK |= (1 << INT0);
 }
 
+
+/* Count Timer1 overflows */
 ISR(TIMER1_OVF_vect)
 {
     timer1OverflowCount++;
 }
 
+
+/* Capture every rising edge on D2 */
 ISR(INT0_vect)
 {
     uint16_t count = TCNT1;
     uint32_t overflow = timer1OverflowCount;
 
-    /* Handle Timer1 overflow/capture race */
+    /* Correct overflow/capture race */
     if ((TIFR1 & (1 << TOV1)) && count < 32768U)
         overflow++;
 
@@ -161,6 +199,8 @@ ISR(INT0_vect)
     lastEdgeMillis = millis();
 }
 
+
+/* Safely read 32-bit period value */
 uint32_t getPeriodTicks()
 {
     uint32_t value;
@@ -173,6 +213,8 @@ uint32_t getPeriodTicks()
     return value;
 }
 
+
+/* Safely read last edge time */
 uint32_t getLastEdgeMillis()
 {
     uint32_t value;
@@ -185,6 +227,8 @@ uint32_t getLastEdgeMillis()
     return value;
 }
 
+
+/* Safely read frequency status */
 bool getFrequencyValid()
 {
     bool value;
@@ -197,18 +241,19 @@ bool getFrequencyValid()
     return value;
 }
 
+
+/* Frequency = Timer1 clock / measured period */
 uint32_t calculateFrequency(uint32_t period)
 {
     if (period == 0)
         return 0;
 
+    /* Rounded frequency calculation */
     return (TIMER1_TICK_HZ + period / 2UL) / period;
 }
 
-/* ============================================================
-   SOFTWARE SCHEDULER
-   ============================================================ */
 
+/* Software Timer A: 1 second */
 void taskA()
 {
     taskACount++;
@@ -221,17 +266,23 @@ void taskA()
     Serial.println(taskCCount);
 }
 
+
+/* Software Timer B: 500 ms */
 void taskB()
 {
     taskBCount++;
 }
 
+
+/* Software Timer C: 250 ms */
 void taskC()
 {
     taskCCount++;
 }
 
- void runScheduler(uint32_t now)
+
+/* Run missed software timer events without blocking */
+void runScheduler(uint32_t now)
 {
     while ((int32_t)(now - nextTaskB) >= 0)
     {
@@ -250,13 +301,10 @@ void taskC()
         taskA();
         nextTaskA += TASK_A_TIME;
     }
-  }
+}
 
 
-/* ============================================================
-   FREQUENCY TIMEOUT
-   ============================================================ */
-
+/* Detect missing input signal */
 void updateFrequency(uint32_t now)
 {
     if (!getFrequencyValid())
@@ -264,24 +312,13 @@ void updateFrequency(uint32_t now)
 
     if ((uint32_t)(now - getLastEdgeMillis()) >= SIGNAL_TIMEOUT)
     {
-        uint8_t sreg = SREG;
-
-        cli();
-
-        frequencyValid = false;
-        firstEdge = true;
-        periodTicks = 0;
-
-        SREG = sreg;
-
+        invalidateFrequency();
         Serial.println("FREQUENCY: WAIT - NO SIGNAL");
     }
 }
 
-/* ============================================================
-   PWM / LCD UPDATE
-   ============================================================ */
 
+/* Change PWM duty every 3 seconds */
 void updatePwm(uint32_t now)
 {
     if ((int32_t)(now - nextDutyChange) < 0)
@@ -296,10 +333,13 @@ void updatePwm(uint32_t now)
 
     nextDutyChange += DUTY_TIME;
 
+    /* Recover scheduler if execution was delayed */
     if ((uint32_t)(now - nextDutyChange) > DUTY_TIME * 2UL)
         nextDutyChange = now + DUTY_TIME;
 }
 
+
+/* Rotate LCD through 3 information pages */
 void updateLcd(uint32_t now)
 {
     if ((int32_t)(now - nextLcdPage) < 0)
@@ -313,6 +353,7 @@ void updateLcd(uint32_t now)
 
     lcd.clear();
 
+    /* Page 1: PWM and frequency */
     if (lcdPage == 0)
     {
         lcd.setCursor(0, 0);
@@ -333,6 +374,8 @@ void updateLcd(uint32_t now)
             lcd.print("FREQ:WAIT");
         }
     }
+
+    /* Page 2: Software timers */
     else if (lcdPage == 1)
     {
         lcd.setCursor(0, 0);
@@ -345,6 +388,8 @@ void updateLcd(uint32_t now)
         lcd.print("C:");
         lcd.print(taskCCount);
     }
+
+    /* Page 3: Timer1 measurement */
     else
     {
         lcd.setCursor(0, 0);
@@ -369,16 +414,13 @@ void updateLcd(uint32_t now)
         lcdPage = 0;
 }
 
-/* ============================================================
-   SETUP / LOOP
-   ============================================================ */
 
 void setup()
 {
     Serial.begin(115200);
     lcd.begin(16, 2);
 
-    /* Atomic timer initialization */
+    /* Protect timer/interrupt configuration */
     uint8_t sreg = SREG;
     cli();
 
@@ -386,8 +428,6 @@ void setup()
     setupFrequencyMeasurement();
 
     SREG = sreg;
-
-    setPwmDuty(50);
 
     uint32_t now = millis();
 
@@ -407,7 +447,11 @@ void setup()
     Serial.println("TIMER1 RESERVED: FREQUENCY");
     Serial.println("TIMER2 RESERVED: PWM");
     Serial.println("==============================");
+
+    /* Start at 0% duty */
+    setPwmDuty(dutyValues[dutyIndex]);
 }
+
 
 void loop()
 {
